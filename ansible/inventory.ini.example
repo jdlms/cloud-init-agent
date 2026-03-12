@@ -1,0 +1,2 @@
+[devbox]
+devbox ansible_host=VM_IP_HERE ansible_user=CI_USER_HERE ansible_connection=ssh

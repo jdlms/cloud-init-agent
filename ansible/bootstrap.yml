@@ -1,0 +1,121 @@
+---
+- hosts: devbox
+  become: true
+  vars:
+    devbox_user: jdlms
+  vars_files:
+    - secrets.yml
+
+  tasks:
+    # --- OS setup ---
+
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install base packages
+      apt:
+        name:
+          - curl
+          - git
+          - vim
+          - htop
+          - build-essential
+          - jq
+          - ca-certificates
+          - gnupg
+          - qemu-guest-agent
+        state: present
+
+    - name: Enable qemu-guest-agent
+      service:
+        name: qemu-guest-agent
+        state: started
+        enabled: true
+
+    # --- Node.js 22 LTS ---
+
+    - name: Add NodeSource GPG key
+      shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+          | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+      args:
+        creates: /etc/apt/keyrings/nodesource.gpg
+
+    - name: Add NodeSource apt repository
+      copy:
+        content: "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main"
+        dest: /etc/apt/sources.list.d/nodesource.list
+        mode: "0644"
+
+    - name: Install Node.js
+      apt:
+        update_cache: yes
+        name: nodejs
+        state: present
+
+    # --- Claude Code ---
+
+    - name: Install Claude Code globally
+      command: npm install -g @anthropic-ai/claude-code
+      args:
+        creates: /usr/lib/node_modules/@anthropic-ai/claude-code
+
+    # --- Anthropic API key ---
+
+    - name: Set Anthropic API key in /etc/environment
+      lineinfile:
+        path: /etc/environment
+        regexp: "^ANTHROPIC_API_KEY="
+        line: "ANTHROPIC_API_KEY={{ anthropic_api_key }}"
+        state: present
+
+    # --- GitHub CLI ---
+
+    - name: Add GitHub CLI GPG key
+      shell: |
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+          -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+
+    - name: Add GitHub CLI apt repository
+      copy:
+        content: "deb [arch={{ ansible_architecture | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64') }} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+        dest: /etc/apt/sources.list.d/github-cli.list
+        mode: "0644"
+
+    - name: Install GitHub CLI
+      apt:
+        update_cache: yes
+        name: gh
+        state: present
+
+    - name: Authenticate GitHub CLI as {{ devbox_user }}
+      shell: echo "{{ github_pat }}" | gh auth login --with-token
+      become_user: "{{ devbox_user }}"
+      args:
+        creates: "/home/{{ devbox_user }}/.config/gh/hosts.yml"
+      no_log: true
+
+    # --- Tailscale ---
+
+    - name: Install Tailscale
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        creates: /usr/bin/tailscale
+
+    - name: Start Tailscale with SSH
+      command: >
+        tailscale up
+        --authkey={{ tailscale_auth_key }}
+        --ssh
+        --accept-dns=false
+      register: tailscale_up
+      changed_when: "'Success' in tailscale_up.stdout or tailscale_up.rc == 0"
+      no_log: true
+
+# ansible-playbook -i devbox/ansible/inventory.ini devbox/ansible/bootstrap.yml --ask-vault-pass
