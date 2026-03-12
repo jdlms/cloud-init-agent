@@ -1,4 +1,4 @@
-# Devbox
+# cloud-init-agent-space
 
 A Proxmox cloud-init VM provisioned via Terraform and bootstrapped with Ansible. Comes with Claude Code, GitHub CLI, and Tailscale SSH.
 
